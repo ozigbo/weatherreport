@@ -1,55 +1,51 @@
+"""
+Weather data fetcher module for the Weather Dashboard application.
+Uses the Open-Meteo API to fetch weather data for specified locations.
+"""
+
 import logging
 import pandas as pd
-import openmeteo_requests
-import requests_cache
-from retry_requests import retry
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
-from timezonefinder import TimezoneFinder
 import requests
+from timezonefinder import TimezoneFinder
+import requests_cache
+import openmeteo_requests
+from retry_requests import retry
 
-# Set pandas display options to show all columns
-pd.set_option('display.max_columns', None)
-pd.set_option('display.width', None)
-pd.set_option('display.max_rows', 5)
-
-# --------------------------
-# Logging Configuration
-# --------------------------
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Initialize the cache with a 1-hour expiration
+# Initialize API client with caching (1-hour expiration)
 requests_cache.install_cache('.cache', expire_after=3600)
-
-# Setup the Open-Meteo API client with cache
 openmeteo = openmeteo_requests.Client()
 
-# --------------------------
-# Weather Fetching Function
-# --------------------------
-def fetch_weather_data(latitude, longitude):
+def fetch_weather_data(latitude: float, longitude: float) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Fetch weather data from OpenMeteo API for a given location
-    """
-    print("\n=== Weather Fetcher Debug ===")
-    print(f"Fetching weather data for: {latitude}, {longitude}")
+    Fetch weather data from OpenMeteo API for a given location.
     
+    Args:
+        latitude (float): Location latitude
+        longitude (float): Location longitude
+        
+    Returns:
+        tuple: (hourly_df, daily_df) containing weather data
+            hourly_df: DataFrame with hourly weather metrics
+            daily_df: DataFrame with daily sunrise/sunset times
+    """
     try:
         # Get timezone for the location
         tf = TimezoneFinder()
-        timezone_str = tf.timezone_at(lat=latitude, lng=longitude)
-        if not timezone_str:
-            timezone_str = "UTC"
+        timezone_str = tf.timezone_at(lat=latitude, lng=longitude) or "UTC"
         
-        print(f"Using timezone: {timezone_str}")
-        
-        # Make API request
+        # API request parameters
         url = "https://api.open-meteo.com/v1/forecast"
         params = {
             "latitude": latitude,
             "longitude": longitude,
-            "timezone": timezone_str,  # Use location's timezone
+            "timezone": timezone_str,
             "hourly": [
                 "precipitation_probability",
                 "cloud_cover",
@@ -61,20 +57,15 @@ def fetch_weather_data(latitude, longitude):
                 "pressure_msl",
                 "weather_code"
             ],
-            "daily": ["sunrise", "sunset"],  # Request daily sunrise/sunset times
+            "daily": ["sunrise", "sunset"],
             "forecast_days": 7,
             "current_weather": True
         }
         
-        print("Making API request...")
-        print(f"URL: {url}")
-        print(f"Parameters: {params}")
-        
+        # Make API request
         response = requests.get(url, params=params)
         response.raise_for_status()
         data = response.json()
-        
-        print("API request successful!")
         
         # Process hourly data
         hourly_df = pd.DataFrame({
@@ -90,32 +81,24 @@ def fetch_weather_data(latitude, longitude):
             'weather_code': data['hourly']['weather_code']
         })
         
-        # Add timezone information to hourly data
+        # Add timezone information
         hourly_df['time'] = hourly_df['time'].dt.tz_localize(timezone_str)
         
-        # Process daily data with sunrise/sunset times
+        # Process daily data
         daily_df = pd.DataFrame({
             'date': pd.to_datetime(data['daily']['time']),
             'sunrise': pd.to_datetime(data['daily']['sunrise']),
             'sunset': pd.to_datetime(data['daily']['sunset'])
         })
         
-        # Convert sunrise/sunset times to datetime with timezone
+        # Add timezone information to sunrise/sunset
         daily_df['sunrise'] = daily_df['sunrise'].dt.tz_localize(timezone_str)
         daily_df['sunset'] = daily_df['sunset'].dt.tz_localize(timezone_str)
-        
-        print("\nFirst day data:")
-        print(f"Date: {daily_df['date'].iloc[0]}")
-        print(f"Sunrise: {daily_df['sunrise'].iloc[0]}")
-        print(f"Sunset: {daily_df['sunset'].iloc[0]}")
-        
-        print("=== End Weather Fetcher Debug ===\n")
         
         return hourly_df, daily_df
         
     except Exception as e:
-        print(f"Error fetching weather data: {str(e)}")
-        print(f"Response data: {data if 'data' in locals() else 'No data received'}")
+        logger.error(f"Error fetching weather data: {str(e)}")
         return None, None
 
 # --------------------------

@@ -1,4 +1,4 @@
-from dash import Dash, html, dcc, callback, Output, Input
+from dash import Dash, html, dcc, callback, Output, Input, no_update, State, callback_context
 import plotly.express as px
 import dash_bootstrap_components as dbc
 import dash_daq as daq
@@ -11,6 +11,7 @@ import pandas as pd
 import pytz
 from timezonefinder import TimezoneFinder
 from zoneinfo import ZoneInfo
+from flask import request, jsonify
 
 # Add timestamp for cache busting
 current_timestamp = int(time.time())
@@ -39,15 +40,19 @@ app.index_string = '''
                 background-color: #f5f5dc;
                 border: 2px solid #000080;
                 border-radius: 15px;
-                padding: 1.5rem;
+                padding: 1.2rem;
                 margin-bottom: 1.5rem;
-                width: 300px;
+                width: 420px;
+                height: 300px;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
             }
 
             .current-weather-title {
                 font-family: 'DM Serif Display', serif;
-                font-size: 1rem;
-                letter-spacing: 0.1em;
+                font-size: 24px;
+                letter-spacing: 0.2em;
                 color: #000080;
                 margin-bottom: 1rem;
                 text-transform: uppercase;
@@ -55,28 +60,28 @@ app.index_string = '''
 
             .current-weather-location {
                 font-family: 'DM Serif Display', serif;
-                font-size: 2rem;
+                font-size: 1.8rem;
                 color: #333;
-                margin-bottom: 1rem;
+                margin-bottom: 0.8rem;
             }
 
             .current-weather-main {
                 display: flex;
                 align-items: center;
                 gap: 1rem;
-                margin-bottom: 1.5rem;
+                margin-bottom: 1rem;
             }
 
             .current-weather-temp {
                 font-family: 'Courier Prime', monospace;
-                font-size: 3.5rem;
+                font-size: 3.2rem;
                 font-weight: bold;
                 color: #333;
             }
 
             .current-weather-icon {
-                width: 64px;
-                height: 64px;
+                width: 56px;
+                height: 56px;
             }
 
             .current-weather-details {
@@ -102,7 +107,6 @@ app.index_string = '''
                 color: #333;
             }
 
-            /* Weekly Forecast Styles */
             .forecast-section {
                 width: 50%;
             }
@@ -113,7 +117,7 @@ app.index_string = '''
                 border-radius: 15px;
                 padding: 1.5rem;
                 margin-bottom: 1.5rem;
-                width: 100%;  /* Ensure full width */
+                width: 100%;
             }
 
             .forecast-header {
@@ -130,7 +134,7 @@ app.index_string = '''
                 display: flex;
                 flex-wrap: nowrap !important;
                 margin: 0;
-                gap: 1rem;  /* Add space between day cards */
+                gap: 1rem;
             }
 
             .day-col {
@@ -183,17 +187,16 @@ app.index_string = '''
             .temp-toggle-options {
                 display: flex;
                 justify-content: center;
-                gap: 60px;  /* Space between the two option columns */
+                gap: 60px;
             }
 
             .temp-option {
                 display: flex;
                 flex-direction: column;
                 align-items: center;
-                gap: 8px;  /* Space between label and radio button */
+                gap: 8px;
             }
 
-            /* Retro radio button styling */
             .temp-toggle-container input[type="radio"] {
                 appearance: none;
                 width: 24px;
@@ -228,72 +231,105 @@ app.index_string = '''
 
             .current-weather-card.forecast {
                 width: 100%;
-                min-width: 600px;  /* Ensure minimum width for readability */
+                min-width: 600px;
+                height: 300px;
             }
 
             .precipitation-card {
                 margin-top: 1.5rem;
-                width: 100%;  /* Ensure full width */
+                width: 100%;
             }
 
             .precipitation-graph {
                 background-color: #f5f5dc;
                 border-radius: 15px;
                 padding: 1rem;
-                width: 100%;  /* Ensure full width */
+                width: 100%;
             }
 
             .sunrise-sunset-card {
                 background-color: #f5f5dc;
                 border: 2px solid #000080;
                 border-radius: 15px;
-                padding: 2.5rem 1.5rem;  /* Increased top/bottom padding */
+                padding: 1.5rem 1rem;
                 margin-top: 1.5rem;
                 display: flex;
-                justify-content: space-between;
+                flex-direction: column;
+                height: 300px;
+                overflow: hidden;
+                width: 420px;
+            }
+
+            .sun-content {
+                display: flex;
+                flex-direction: row;
+                justify-content: space-around;
                 align-items: center;
-                min-height: 250px;  /* Increased to accommodate larger icons */
+                width: 100%;
+                flex: 1;
+                gap: 0.5rem;
+                margin-top: 0.5rem;
+            }
+
+            .sun-section {
+                flex: 0 1 45%;
+                height: 100%;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 0.3rem;
+                min-width: 0;
             }
 
             .sun-divider {
                 width: 2px;
-                height: 160px;  /* Increased to match new icon size */
+                height: 85%;
                 background-color: #000080;
                 opacity: 0.3;
-                margin: 0 1rem;
+                margin: 0 0.3rem;
+                flex: 0 0 auto;
+                align-self: center;
             }
 
-            .sun-section {
-                flex: 1;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                gap: 1rem;  /* Increased from 0.5rem for better spacing */
-                padding: 0.5rem;  /* Added padding for breathing room */
+            .sun-icon {
+                width: 80px;
+                height: 80px;
+                margin-bottom: 0.8rem;
+                object-fit: contain;
             }
 
             .sun-label {
                 font-family: 'DM Serif Display', serif;
-                font-size: 1.2rem;  /* Increased from 1rem */
-                letter-spacing: 0.2em;
+                font-size: 1rem;
+                letter-spacing: 0.1em;
                 color: #000080;
-                margin-bottom: 0.5rem;
-                text-align: center;  /* Ensure centered text */
+                margin-bottom: 0.4rem;
+                text-align: center;
+                white-space: nowrap;
             }
 
             .sun-time {
                 font-family: 'Courier Prime', monospace;
-                font-size: 2.2rem;  /* Increased from 2rem */
+                font-size: 2rem;
                 font-weight: bold;
                 color: #000080;
-                text-align: center;  /* Ensure centered text */
+                text-align: center;
+                white-space: nowrap;
             }
 
-            .sun-icon {
-                width: 96px;  /* Increased from 64px to 96px (50% larger) */
-                height: 96px; /* Increased from 64px to 96px (50% larger) */
-                margin-bottom: 1rem;
-                object-fit: contain;
+            .temperature-trend-card {
+                height: 250px;
+                margin-top: 1.5rem;
+                padding: 1rem;
+            }
+
+            .vertical-divider {
+                width: 2px;
+                height: 600px;
+                background-color: #000080;
+                opacity: 0.2;
+                margin: 0 1rem;
             }
         </style>
     </head>
@@ -679,11 +715,11 @@ app.layout = dbc.Container([
                             for city in cities_by_country[country]
                         ],
                         value='New York',
-                        className='mb-3'
+                        className='mb-2'
                     )
                 ])
             ], className='mb-4')
-        ], width=8),  # 8/12 = ~70%
+        ], width=8),
         
         # Temperature Toggle (30% width)
         dbc.Col([
@@ -714,7 +750,7 @@ app.layout = dbc.Container([
                     ], className='temp-toggle-container')
                 ])
             ], className='mb-4')
-        ], width=4)  # 4/12 = ~30%
+        ], width=4)
     ]),
     
     dbc.Row([
@@ -737,7 +773,20 @@ def update_weather(selected_city, temp_unit):
         return html.P('Please select a city')
     
     # Get coordinates for selected city
-    lat, lon = cities[selected_city]
+    try:
+        lat, lon = cities[selected_city]
+    except KeyError:
+        return dbc.Alert(
+            "Please select a valid city from the dropdown.",
+            color="warning",
+            className="mb-3",
+            style={
+                'background-color': '#f5f5dc',
+                'color': '#000080',
+                'border-color': '#000080',
+                'font-family': 'Courier Prime, monospace'
+            }
+        )
     
     # Fetch weather data
     df, daily_df = fetch_weather_data(lat, lon)
@@ -783,22 +832,28 @@ def update_weather(selected_city, temp_unit):
 
         # Create sunrise/sunset component
         sun_times = html.Div([
-            # Sunrise section
-            html.Div([
-                html.Img(src=f'/assets/sunrise.png?v={current_timestamp}', className='sun-icon'),
-                html.Div("SUNRISE", className='sun-label'),
-                html.Div(sunrise_str, className='sun-time')
-            ], className='sun-section'),
+            # Title
+            html.Div("SUNRISE/SUNSET", className="current-weather-title"),
             
-            # Divider
-            html.Div(className='sun-divider'),
-            
-            # Sunset section
+            # Content container
             html.Div([
-                html.Img(src=f'/assets/sunset.png?v={current_timestamp}', className='sun-icon'),
-                html.Div("SUNSET", className='sun-label'),
-                html.Div(sunset_str, className='sun-time')
-            ], className='sun-section')
+                # Sunrise section
+                html.Div([
+                    html.Img(src=f'/assets/sunrise.png?v={current_timestamp}', className='sun-icon'),
+                    html.Div("SUNRISE", className='sun-label'),
+                    html.Div(sunrise_str, className='sun-time')
+                ], className='sun-section'),
+                
+                # Divider
+                html.Div(className='sun-divider'),
+                
+                # Sunset section
+                html.Div([
+                    html.Img(src=f'/assets/sunset.png?v={current_timestamp}', className='sun-icon'),
+                    html.Div("SUNSET", className='sun-label'),
+                    html.Div(sunset_str, className='sun-time')
+                ], className='sun-section')
+            ], className='sun-content')
         ], className='current-weather-card sunrise-sunset-card')
 
         # Convert the DataFrame dates to city timezone and find current data
@@ -1061,7 +1116,7 @@ def update_weather(selected_city, temp_unit):
                 text='<span style="letter-spacing: 0.2em">TEMPERATURE TREND</span>',
                 font=dict(
                     family='DM Serif Display, serif',
-                    size=24,
+                    size=24,  # Increased to match other titles
                     color='#000080'
                 ),
                 x=0,
@@ -1073,20 +1128,28 @@ def update_weather(selected_city, temp_unit):
                 gridcolor='rgba(0,0,128,0.1)',
                 tickangle=45,
                 tickfont=dict(
-                    size=14,  # Increased time label size
+                    size=16,  # Increased by 30% from 12
                     family='Courier Prime, monospace'
-                )
+                ),
+                showline=True,      # Show the X-axis line
+                linewidth=2,        # Width of the X-axis line
+                linecolor='#000080',  # Color matching our theme
+                mirror=False,       # Don't mirror the line
+                showspikes=False,   # No spike lines
+                zeroline=False      # No zero line
             ),
             yaxis=dict(
                 showgrid=True,
                 gridcolor='rgba(0,0,128,0.1)',
                 ticksuffix=f'°{temp_unit}',
                 dtick=5,
-                range=[min(temperatures) - 5, max(temperatures) + 10],  # Add padding for labels
-                tickfont=dict(size=12)
+                range=[min(temperatures) - 5, max(temperatures) + 10],
+                tickfont=dict(size=12),
+                showline=False,     # No Y-axis line
+                zeroline=False      # No zero line
             ),
-            margin=dict(t=40, r=20, b=50, l=40),  # Increased bottom margin for larger labels
-            height=300,
+            margin=dict(t=30, r=20, b=30, l=40),  # Adjusted margins
+            height=190,  # Adjusted to fit in the 250px container with padding
             width=None,
             autosize=True,
             showlegend=False,
@@ -1099,7 +1162,7 @@ def update_weather(selected_city, temp_unit):
                 config={'displayModeBar': False},
                 style={'width': '100%', 'height': '100%'}
             )
-        ], className='current-weather-card precipitation-card')
+        ], className='current-weather-card temperature-trend-card forecast')
 
         return [
             dbc.Row([
@@ -1107,9 +1170,9 @@ def update_weather(selected_city, temp_unit):
                 dbc.Col([
                     current_weather,
                     sun_times
-                ], width=4),
+                ], width=5, style={"paddingRight": "0.5rem"}),  # Minimal right padding
                 
-                # 7-Day Forecast Section
+                # Week Forecast Section
                 dbc.Col([
                     html.Div([
                         html.Div("WEEK FORECAST", className="current-weather-title"),
@@ -1117,16 +1180,21 @@ def update_weather(selected_city, temp_unit):
                             forecast_cards,
                             className='forecast-row'
                         )
-                    ], className='current-weather-card forecast')
-                ], width=6)
-            ]),
+                    ], className='current-weather-card forecast'),
+                    
+                    # Temperature Trend Chart
+                    html.Div([
+                        dcc.Graph(
+                            figure=temp_fig,
+                            config={'displayModeBar': False},
+                            style={'width': '100%', 'height': '100%'}
+                        )
+                    ], className='current-weather-card temperature-trend-card forecast')
+                ], width=7, style={"paddingLeft": "0.5rem"})  # Minimal left padding
+            ], className="g-0"),  # Remove default gutters
             # Precipitation Graph Row
             dbc.Row([
                 dbc.Col([precipitation_graph], width=12)
-            ]),
-            # Temperature Trend Graph Row
-            dbc.Row([
-                dbc.Col([temperature_graph], width=12)
             ])
         ]
     else:
