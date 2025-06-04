@@ -3,15 +3,310 @@ import plotly.express as px
 import dash_bootstrap_components as dbc
 import dash_daq as daq
 from weather_fetcher import fetch_weather_data
+from weather_codes import get_weather_info
+from datetime import datetime, timedelta
+import time
+import plotly.graph_objects as go
+import pandas as pd
+import pytz
+from timezonefinder import TimezoneFinder
+from zoneinfo import ZoneInfo
+
+# Add timestamp for cache busting
+current_timestamp = int(time.time())
 
 # Initialize the Dash app with a modern theme and Font Awesome
 app = Dash(
     __name__, 
     external_stylesheets=[
         dbc.themes.FLATLY,
-        'https://use.fontawesome.com/releases/v5.15.4/css/all.css'
+        'https://use.fontawesome.com/releases/v5.15.4/css/all.css',
+        'https://fonts.googleapis.com/css2?family=Courier+Prime&family=DM+Serif+Display&display=swap'
     ]
 )
+
+# Custom CSS for the components
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            .current-weather-card {
+                background-color: #f5f5dc;
+                border: 2px solid #000080;
+                border-radius: 15px;
+                padding: 1.5rem;
+                margin-bottom: 1.5rem;
+                width: 300px;
+            }
+
+            .current-weather-title {
+                font-family: 'DM Serif Display', serif;
+                font-size: 1rem;
+                letter-spacing: 0.1em;
+                color: #000080;
+                margin-bottom: 1rem;
+                text-transform: uppercase;
+            }
+
+            .current-weather-location {
+                font-family: 'DM Serif Display', serif;
+                font-size: 2rem;
+                color: #333;
+                margin-bottom: 1rem;
+            }
+
+            .current-weather-main {
+                display: flex;
+                align-items: center;
+                gap: 1rem;
+                margin-bottom: 1.5rem;
+            }
+
+            .current-weather-temp {
+                font-family: 'Courier Prime', monospace;
+                font-size: 3.5rem;
+                font-weight: bold;
+                color: #333;
+            }
+
+            .current-weather-icon {
+                width: 64px;
+                height: 64px;
+            }
+
+            .current-weather-details {
+                display: flex;
+                justify-content: space-between;
+                font-family: 'Courier Prime', monospace;
+                color: #666;
+                padding-top: 1rem;
+                border-top: 1px solid #000080;
+            }
+
+            .current-weather-detail-item {
+                text-align: center;
+            }
+
+            .detail-label {
+                font-size: 0.8rem;
+                margin-bottom: 0.25rem;
+            }
+
+            .detail-value {
+                font-size: 1.1rem;
+                color: #333;
+            }
+
+            /* Weekly Forecast Styles */
+            .forecast-section {
+                width: 50%;
+            }
+
+            .forecast-card {
+                background-color: #f5f5dc;
+                border: 2px solid #000080;
+                border-radius: 15px;
+                padding: 1.5rem;
+                margin-bottom: 1.5rem;
+                width: 100%;  /* Ensure full width */
+            }
+
+            .forecast-header {
+                font-family: 'DM Serif Display', serif;
+                font-size: 1rem;
+                letter-spacing: 0.2em;
+                color: #000080;
+                margin-bottom: 1rem;
+                text-transform: uppercase;
+                text-align: left;
+            }
+
+            .forecast-row {
+                display: flex;
+                flex-wrap: nowrap !important;
+                margin: 0;
+                gap: 1rem;  /* Add space between day cards */
+            }
+
+            .day-col {
+                flex: 1;
+                min-width: 0;
+                padding: 0.5rem;
+            }
+
+            .day-card {
+                text-align: center;
+                padding: 0.5rem;
+                font-family: 'Courier Prime', monospace;
+            }
+
+            .day-name {
+                font-family: 'DM Serif Display', serif;
+                font-size: 1rem;
+                margin-bottom: 0.25rem;
+            }
+
+            .weather-icon {
+                width: 48px;
+                height: 48px;
+                margin: 0.25rem auto;
+                display: block;
+            }
+
+            .high-temp {
+                font-size: 1.4rem;
+                font-weight: bold;
+                margin: 0.25rem 0;
+            }
+
+            .low-temp {
+                font-size: 1rem;
+                color: #666;
+            }
+
+            .temp-toggle-container {
+                text-align: center;
+                font-family: 'Courier Prime', monospace;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+                padding: 10px;
+            }
+
+            .temp-toggle-options {
+                display: flex;
+                justify-content: center;
+                gap: 60px;  /* Space between the two option columns */
+            }
+
+            .temp-option {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 8px;  /* Space between label and radio button */
+            }
+
+            /* Retro radio button styling */
+            .temp-toggle-container input[type="radio"] {
+                appearance: none;
+                width: 24px;
+                height: 24px;
+                border: 2px solid #8b4513;
+                border-radius: 50%;
+                position: relative;
+                cursor: pointer;
+            }
+
+            .temp-toggle-container input[type="radio"]:checked {
+                border-color: #8b4513;
+                background-color: #f5f5dc;
+            }
+
+            .temp-toggle-container input[type="radio"]:checked::after {
+                content: '';
+                width: 12px;
+                height: 12px;
+                background: #8b4513;
+                border-radius: 50%;
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+            }
+
+            .unit-label {
+                font-size: 1.2rem;
+                color: #8b4513;
+            }
+
+            .current-weather-card.forecast {
+                width: 100%;
+                min-width: 600px;  /* Ensure minimum width for readability */
+            }
+
+            .precipitation-card {
+                margin-top: 1.5rem;
+                width: 100%;  /* Ensure full width */
+            }
+
+            .precipitation-graph {
+                background-color: #f5f5dc;
+                border-radius: 15px;
+                padding: 1rem;
+                width: 100%;  /* Ensure full width */
+            }
+
+            .sunrise-sunset-card {
+                background-color: #f5f5dc;
+                border: 2px solid #000080;
+                border-radius: 15px;
+                padding: 2.5rem 1.5rem;  /* Increased top/bottom padding */
+                margin-top: 1.5rem;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                min-height: 250px;  /* Increased to accommodate larger icons */
+            }
+
+            .sun-divider {
+                width: 2px;
+                height: 160px;  /* Increased to match new icon size */
+                background-color: #000080;
+                opacity: 0.3;
+                margin: 0 1rem;
+            }
+
+            .sun-section {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 1rem;  /* Increased from 0.5rem for better spacing */
+                padding: 0.5rem;  /* Added padding for breathing room */
+            }
+
+            .sun-label {
+                font-family: 'DM Serif Display', serif;
+                font-size: 1.2rem;  /* Increased from 1rem */
+                letter-spacing: 0.2em;
+                color: #000080;
+                margin-bottom: 0.5rem;
+                text-align: center;  /* Ensure centered text */
+            }
+
+            .sun-time {
+                font-family: 'Courier Prime', monospace;
+                font-size: 2.2rem;  /* Increased from 2rem */
+                font-weight: bold;
+                color: #000080;
+                text-align: center;  /* Ensure centered text */
+            }
+
+            .sun-icon {
+                width: 96px;  /* Increased from 64px to 96px (50% larger) */
+                height: 96px; /* Increased from 64px to 96px (50% larger) */
+                margin-bottom: 1rem;
+                object-fit: contain;
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
 
 # Define cities grouped by country
 cities_by_country = {
@@ -371,6 +666,7 @@ app.layout = dbc.Container([
     ]),
     
     dbc.Row([
+        # Location Dropdown (70% width)
         dbc.Col([
             dbc.Card([
                 dbc.CardBody([
@@ -387,7 +683,38 @@ app.layout = dbc.Container([
                     )
                 ])
             ], className='mb-4')
-        ], width=12)
+        ], width=8),  # 8/12 = ~70%
+        
+        # Temperature Toggle (30% width)
+        dbc.Col([
+            dbc.Card([
+                dbc.CardBody([
+                    html.H4('Unit', className='card-title'),
+                    html.Div([
+                        html.Div([
+                            # Temperature options with labels
+                            html.Div([
+                                html.Span("°C", className='unit-label')
+                            ], className='temp-option'),
+                            html.Div([
+                                html.Span("°F", className='unit-label')
+                            ], className='temp-option')
+                        ], className='temp-toggle-options'),
+                        # Single radio button group below
+                        dcc.RadioItems(
+                            id='temp-unit-toggle',
+                            options=[
+                                {'label': '', 'value': 'C'},
+                                {'label': '', 'value': 'F'}
+                            ],
+                            value='C',
+                            className='radio-group',
+                            style={'display': 'flex', 'gap': '60px', 'margin-top': '8px'}
+                        )
+                    ], className='temp-toggle-container')
+                ])
+            ], className='mb-4')
+        ], width=4)  # 4/12 = ~30%
     ]),
     
     dbc.Row([
@@ -397,11 +724,15 @@ app.layout = dbc.Container([
     ])
 ], fluid=True)
 
+def celsius_to_fahrenheit(celsius):
+    return (celsius * 9/5) + 32
+
 @callback(
     Output('weather-display', 'children'),
-    Input('city-dropdown', 'value')
+    [Input('city-dropdown', 'value'),
+     Input('temp-unit-toggle', 'value')]
 )
-def update_weather(selected_city):
+def update_weather(selected_city, temp_unit):
     if selected_city is None:
         return html.P('Please select a city')
     
@@ -409,74 +740,394 @@ def update_weather(selected_city):
     lat, lon = cities[selected_city]
     
     # Fetch weather data
-    df = fetch_weather_data(lat, lon)
+    df, daily_df = fetch_weather_data(lat, lon)
     
-    if df is not None:
-        # Create temperature trend graph
-        fig = px.line(
-            df.head(24),  # First 24 hours
-            x='date',
-            y='dew_point_2m',
-            title='24-Hour Temperature Trend',
-            labels={'date': 'Time', 'dew_point_2m': 'Temperature (°C)'}
-        )
+    if df is not None and daily_df is not None:
+        # Get timezone for the selected city
+        tf = TimezoneFinder()
+        timezone_str = tf.timezone_at(lat=lat, lng=lon)
+        city_tz = ZoneInfo(timezone_str)
+        
+        # Get current time in city's timezone
+        now = datetime.now(city_tz)
+        today = now.date()
+        
+        # Debug logging for sunrise/sunset times
+        print("\n=== App Timezone Conversion Debug ===")
+        print(f"Selected city: {selected_city}")
+        print(f"Coordinates: {lat}, {lon}")
+        print(f"Detected timezone: {timezone_str}")
+        print(f"Current time in city: {now}")
+        print(f"Today's date: {today}")
+        
+        # Find today's data in the daily DataFrame
+        today_data = daily_df[daily_df['date'].dt.date == today]
+        if today_data.empty:
+            print("WARNING: No data found for today, using first available day")
+            today_data = daily_df.iloc[0:1]
+        
+        today_sun = today_data.iloc[0]
+        
+        print("\nBefore conversion:")
+        print(f"Raw sunrise: {today_sun['sunrise']} ({today_sun['sunrise'].tzinfo})")
+        print(f"Raw sunset: {today_sun['sunset']} ({today_sun['sunset'].tzinfo})")
+        
+        # Format times
+        sunrise_str = today_sun['sunrise'].strftime('%I:%M %p').lstrip('0')
+        sunset_str = today_sun['sunset'].strftime('%I:%M %p').lstrip('0')
+        
+        print("\nFormatted times:")
+        print(f"Sunrise string: {sunrise_str}")
+        print(f"Sunset string: {sunset_str}")
+        print("=================================\n")
+
+        # Create sunrise/sunset component
+        sun_times = html.Div([
+            # Sunrise section
+            html.Div([
+                html.Img(src=f'/assets/sunrise.png?v={current_timestamp}', className='sun-icon'),
+                html.Div("SUNRISE", className='sun-label'),
+                html.Div(sunrise_str, className='sun-time')
+            ], className='sun-section'),
+            
+            # Divider
+            html.Div(className='sun-divider'),
+            
+            # Sunset section
+            html.Div([
+                html.Img(src=f'/assets/sunset.png?v={current_timestamp}', className='sun-icon'),
+                html.Div("SUNSET", className='sun-label'),
+                html.Div(sunset_str, className='sun-time')
+            ], className='sun-section')
+        ], className='current-weather-card sunrise-sunset-card')
+
+        # Convert the DataFrame dates to city timezone and find current data
+        df['local_time'] = df['time'].dt.tz_convert(city_tz)
+        now = datetime.now(city_tz)
+        
+        # Find the closest forecast hour
+        time_diffs = abs(df['local_time'] - now)
+        closest_idx = time_diffs.idxmin()
+        
+        # Get 12 hours of data starting from the closest hour
+        today_data = df.iloc[closest_idx:closest_idx + 12]
+        
+        # Get weather description and icon name for current conditions
+        current_weather_code = df['weather_code'].iloc[0]
+        weather_desc, icon_name = get_weather_info(current_weather_code)
+
+        # Convert temperatures if needed
+        current_temp = df['dew_point_2m'].iloc[0]
+        if temp_unit == 'F':
+            current_temp = celsius_to_fahrenheit(current_temp)
+
+        # Create current weather component
+        current_weather = html.Div([
+            # Current Weather Card
+            html.Div([
+                # Title
+                html.Div("CURRENT WEATHER", className="current-weather-title"),
+                
+                # Location
+                html.Div(selected_city, className="current-weather-location"),
+                
+                # Temperature and Icon
+                html.Div([
+                    html.Div(f"{int(current_temp)}°{temp_unit}", className="current-weather-temp"),
+                    html.Img(src=f'/assets/{icon_name}.png?v={current_timestamp}', className="current-weather-icon")
+                ], className="current-weather-main"),
+                
+                # Details Row
+                html.Div([
+                    # Wind Speed
+                    html.Div([
+                        html.Div("WIND", className="detail-label"),
+                        html.Div(f"{df['wind_speed_180m'].iloc[0]:.1f} mph", className="detail-value")
+                    ], className="current-weather-detail-item"),
+                    
+                    # Humidity
+                    html.Div([
+                        html.Div("HUMIDITY", className="detail-label"),
+                        html.Div(f"{df['relative_humidity_2m'].iloc[0]:.0f}%", className="detail-value")
+                    ], className="current-weather-detail-item")
+                ], className="current-weather-details")
+            ], className="current-weather-card")
+        ])
+
+        # Update forecast cards with correct temperature unit
+        forecast_cards = []
+        current_date = datetime.now()
+        for i in range(0, 7):
+            day_data = df.iloc[i * 24]
+            weather_code = day_data['weather_code']
+            _, icon_name = get_weather_info(weather_code)
+            
+            temp = day_data['dew_point_2m']
+            temp_low = temp - 5  # Simulated low temp
+            
+            if temp_unit == 'F':
+                temp = celsius_to_fahrenheit(temp)
+                temp_low = celsius_to_fahrenheit(temp_low)
+            
+            display_date = current_date.strftime('%a')
+            if i == 0:
+                display_date = 'Today'
+            
+            day_card = dbc.Col([
+                html.Div([
+                    html.Div(
+                        display_date,
+                        className='day-name'
+                    ),
+                    html.Img(
+                        src=f'/assets/{icon_name}.png?v={current_timestamp}',
+                        className='weather-icon'
+                    ),
+                    html.Div(
+                        f"{int(temp)}°{temp_unit}",
+                        className='high-temp'
+                    ),
+                    html.Div(
+                        f"{int(temp_low)}°{temp_unit}",
+                        className='low-temp'
+                    )
+                ], className='day-card')
+            ], className='day-col', width=True)
+            
+            forecast_cards.append(day_card)
+            current_date = current_date.replace(day=current_date.day + 1)
+
+        # Create precipitation probability graph with local time
+        hours = [d.strftime('%I %p').lstrip('0') for d in today_data['local_time']]
+        probabilities = today_data['precipitation_probability']
+        
+        # Calculate y-axis range
+        y_max = max(max(probabilities), 10)  # At least 10%
+
+        # Define color bins
+        def get_marker_color(prob):
+            if prob < 20:
+                return '#4575b4'  # Light blue
+            elif prob < 40:
+                return '#74add1'  # Medium blue
+            elif prob < 60:
+                return '#abd9e9'  # Dark blue
+            elif prob < 80:
+                return '#fdae61'  # Orange
+            else:
+                return '#d73027'  # Red
+
+        # Update title to reflect time range
+        start_time = now.strftime('%I %p').lstrip('0')
+        end_time = (now + timedelta(hours=12)).strftime('%I %p').lstrip('0')
+        
+        fig = go.Figure()
+        
+        # Add the line with data labels
+        fig.add_trace(go.Scatter(
+            x=hours,
+            y=probabilities,
+            mode='lines+markers+text',
+            name='Precipitation Probability',
+            line=dict(
+                color='#000080',
+                width=2
+            ),
+            marker=dict(
+                size=10,
+                color=[get_marker_color(p) for p in probabilities],
+                line=dict(
+                    color='#000080',
+                    width=1
+                )
+            ),
+            text=[f'{int(p)}%' for p in probabilities],
+            textposition='top center',
+            textfont=dict(
+                family='Courier Prime, monospace',
+                size=16,
+                color='#000080'
+            )
+        ))
+        
+        # Update layout for retro style
         fig.update_layout(
-            plot_bgcolor='white',
-            paper_bgcolor='white',
-            margin=dict(t=30, b=30, l=30, r=30)
+            plot_bgcolor='#f5f5dc',
+            paper_bgcolor='#f5f5dc',
+            font=dict(
+                family='Courier Prime, monospace',
+                size=12,
+                color='#000080'
+            ),
+            title=dict(
+                text='<span style="letter-spacing: 0.2em">PRECIPITATION PROBABILITY</span>',
+                font=dict(
+                    family='DM Serif Display, serif',
+                    size=24,
+                    color='#000080'
+                ),
+                x=0,
+                xanchor='left',
+                y=0.95
+            ),
+            xaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(0,0,128,0.1)',
+                tickangle=45,
+                tickfont=dict(size=10),
+                nticks=13  # One tick per hour
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(0,0,128,0.1)',
+                ticksuffix='%',
+                range=[0, y_max * 1.1],
+                dtick=5
+            ),
+            margin=dict(t=40, r=20, b=40, l=40),
+            height=300,
+            width=None,
+            autosize=True
         )
 
-        return [
-            dbc.Card([
-                dbc.CardHeader(
-                    dbc.Row([
-                        dbc.Col(html.H3(f'Weather in {selected_city}', className='text-primary mb-0'), width=8),
-                        dbc.Col(
-                            html.Div([
-                                html.I(className="fas fa-map-marker-alt me-2"),
-                                f"{lat}°N, {lon}°E"
-                            ], className='text-muted text-end'),
-                            width=4
-                        )
-                    ])
+        precipitation_graph = html.Div([
+            dcc.Graph(
+                figure=fig,
+                config={'displayModeBar': False},
+                style={'width': '100%', 'height': '100%'}  # Ensure graph fills container
+            )
+        ], className='current-weather-card precipitation-card')
+
+        # Create temperature trend chart
+        temp_data = today_data.iloc[::2]  # Take every 2nd hour for 2-hour increments
+        hours_temp = [d.strftime('%I %p').lstrip('0') for d in temp_data['local_time']]
+        temperatures = temp_data['dew_point_2m']
+        
+        if temp_unit == 'F':
+            temperatures = [celsius_to_fahrenheit(t) for t in temperatures]
+
+        # Create color scale based on temperature
+        min_temp = min(temperatures)
+        max_temp = max(temperatures)
+        
+        # Generate colors based on temperature values
+        colors = []
+        for temp in temperatures:
+            # Calculate position in the temperature range (0 to 1)
+            position = (temp - min_temp) / (max_temp - min_temp) if max_temp != min_temp else 0.5
+            
+            if position < 0.2:
+                color = '#4575b4'  # Cool blue
+            elif position < 0.4:
+                color = '#74add1'  # Light blue
+            elif position < 0.6:
+                color = '#abd9e9'  # Very light blue
+            elif position < 0.8:
+                color = '#fdae61'  # Light orange
+            else:
+                color = '#f46d43'  # Orange
+                
+            colors.append(color)
+
+        temp_fig = go.Figure()
+        
+        # Add the temperature bars with data labels
+        temp_fig.add_trace(go.Bar(
+            x=hours_temp,
+            y=temperatures,
+            text=[f'{int(t)}°{temp_unit}' for t in temperatures],
+            textposition='outside',
+            marker_color=colors,  # Use our temperature-based colors
+            marker_line_color='#000080',
+            marker_line_width=1,
+            textfont=dict(
+                family='Courier Prime, monospace',
+                size=16,
+                color='#000080'
+            ),
+            hoverinfo='none'
+        ))
+        
+        # Update layout for retro style matching the precipitation chart
+        temp_fig.update_layout(
+            plot_bgcolor='#f5f5dc',
+            paper_bgcolor='#f5f5dc',
+            font=dict(
+                family='Courier Prime, monospace',
+                size=12,
+                color='#000080'
+            ),
+            title=dict(
+                text='<span style="letter-spacing: 0.2em">TEMPERATURE TREND</span>',
+                font=dict(
+                    family='DM Serif Display, serif',
+                    size=24,
+                    color='#000080'
                 ),
-                dbc.CardBody([
-                    dbc.Row([
-                        dbc.Col([
-                            dcc.Graph(figure=fig, config={'displayModeBar': False})
-                        ], width=12, className='mb-4'),
-                    ]),
-                    dbc.Row([
-                        dbc.Col([
-                            dbc.Table([
-                                html.Thead(html.Tr([
-                                    html.Th('Time'),
-                                    html.Th('Cloud Cover'),
-                                    html.Th('Temperature'),
-                                    html.Th('Precipitation')
-                                ], className='table-primary')),
-                                html.Tbody([
-                                    html.Tr([
-                                        html.Td(df['date'].iloc[i].strftime('%H:%M')),
-                                        html.Td([
-                                            html.I(className="fas fa-cloud me-2"),
-                                            f"{df['cloud_cover'].iloc[i]}%"
-                                        ]),
-                                        html.Td([
-                                            html.I(className="fas fa-thermometer-half me-2"),
-                                            f"{df['dew_point_2m'].iloc[i]}°C"
-                                        ]),
-                                        html.Td([
-                                            html.I(className="fas fa-tint me-2"),
-                                            f"{df['precipitation_probability'].iloc[i]}%"
-                                        ])
-                                    ]) for i in range(5)
-                                ])
-                            ], bordered=True, hover=True, responsive=True, striped=True)
-                        ])
-                    ])
-                ])
-            ], className='mb-4 shadow')
+                x=0,
+                xanchor='left',
+                y=0.95
+            ),
+            xaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(0,0,128,0.1)',
+                tickangle=45,
+                tickfont=dict(
+                    size=14,  # Increased time label size
+                    family='Courier Prime, monospace'
+                )
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(0,0,128,0.1)',
+                ticksuffix=f'°{temp_unit}',
+                dtick=5,
+                range=[min(temperatures) - 5, max(temperatures) + 10],  # Add padding for labels
+                tickfont=dict(size=12)
+            ),
+            margin=dict(t=40, r=20, b=50, l=40),  # Increased bottom margin for larger labels
+            height=300,
+            width=None,
+            autosize=True,
+            showlegend=False,
+            bargap=0.2
+        )
+
+        temperature_graph = html.Div([
+            dcc.Graph(
+                figure=temp_fig,
+                config={'displayModeBar': False},
+                style={'width': '100%', 'height': '100%'}
+            )
+        ], className='current-weather-card precipitation-card')
+
+        return [
+            dbc.Row([
+                # Current Weather Section
+                dbc.Col([
+                    current_weather,
+                    sun_times
+                ], width=4),
+                
+                # 7-Day Forecast Section
+                dbc.Col([
+                    html.Div([
+                        html.Div("WEEK FORECAST", className="current-weather-title"),
+                        dbc.Row(
+                            forecast_cards,
+                            className='forecast-row'
+                        )
+                    ], className='current-weather-card forecast')
+                ], width=6)
+            ]),
+            # Precipitation Graph Row
+            dbc.Row([
+                dbc.Col([precipitation_graph], width=12)
+            ]),
+            # Temperature Trend Graph Row
+            dbc.Row([
+                dbc.Col([temperature_graph], width=12)
+            ])
         ]
     else:
         return dbc.Alert('Error fetching weather data', color='danger')
