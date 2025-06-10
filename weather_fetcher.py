@@ -10,35 +10,52 @@ from timezonefinder import TimezoneFinder
 import requests_cache
 import openmeteo_requests
 from retry_requests import retry
+import json
+from datetime import datetime
+import time
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Changed to DEBUG for more detailed logging
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
 # Initialize API client with caching (1-hour expiration)
-requests_cache.install_cache('.cache', expire_after=3600)
+# Temporarily disabled caching for testing
+# requests_cache.install_cache('.cache', expire_after=3600)
 openmeteo = openmeteo_requests.Client()
 
-def fetch_weather_data(latitude: float, longitude: float) -> tuple[pd.DataFrame, pd.DataFrame]:
+def create_retry_session(
+    retries=3,
+    backoff_factor=0.3,
+    status_forcelist=(500, 502, 503, 504),
+    session=None,
+):
+    """Create a requests Session with retry strategy"""
+    session = session or requests.Session()
+    retry = Retry(
+        total=retries,
+        read=retries,
+        connect=retries,
+        backoff_factor=backoff_factor,
+        status_forcelist=status_forcelist,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session
+
+def fetch_weather_data(latitude: float, longitude: float) -> tuple:
     """
-    Fetch weather data from OpenMeteo API for a given location.
-    
-    Args:
-        latitude (float): Location latitude
-        longitude (float): Location longitude
-        
-    Returns:
-        tuple: (hourly_df, daily_df) containing weather data
-            hourly_df: DataFrame with hourly weather metrics
-            daily_df: DataFrame with daily sunrise/sunset times
+    Fetch weather data from Open-Meteo API
+    Returns: tuple(hourly_df, daily_df, timezone_str)
     """
     try:
-        # Get timezone for the location
-        tf = TimezoneFinder()
-        timezone_str = tf.timezone_at(lat=latitude, lng=longitude) or "UTC"
+        # Get timezone string for the location
+        timezone_str = "auto"  # Let the API handle timezone conversion
         
         # API request parameters
         url = "https://api.open-meteo.com/v1/forecast"
@@ -47,6 +64,7 @@ def fetch_weather_data(latitude: float, longitude: float) -> tuple[pd.DataFrame,
             "longitude": longitude,
             "timezone": timezone_str,
             "hourly": [
+                "temperature_2m",
                 "precipitation_probability",
                 "cloud_cover",
                 "relative_humidity_2m",
@@ -58,18 +76,40 @@ def fetch_weather_data(latitude: float, longitude: float) -> tuple[pd.DataFrame,
                 "weather_code"
             ],
             "daily": ["sunrise", "sunset"],
-            "forecast_days": 7,
-            "current_weather": True
+            "forecast_days": 7
         }
+        
+        logger.debug(f"Making API request to {url}")
+        logger.debug(f"Request parameters: {params}")
         
         # Make API request
         response = requests.get(url, params=params)
-        response.raise_for_status()
-        data = response.json()
+        
+        # Debug logging
+        logger.debug(f"API Response Status Code: {response.status_code}")
+        logger.debug(f"API Response Headers: {response.headers}")
+        logger.debug(f"API Response Content: {response.text[:1000]}...")  # First 1000 chars
+        
+        # Check if request was successful
+        if response.status_code != 200:
+            logger.error(f"API request failed with status code {response.status_code}")
+            logger.error(f"Error response: {response.text}")
+            return None, None, None
+            
+        try:
+            data = response.json()
+            timezone_str = data.get('timezone', 'UTC')  # Get timezone from response
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse API response as JSON: {e}")
+            logger.error(f"Raw response: {response.text}")
+            return None, None, None
+        
+        logger.debug("Successfully received API response, processing data...")
         
         # Process hourly data
         hourly_df = pd.DataFrame({
             'time': pd.to_datetime(data['hourly']['time']),
+            'temperature_2m': data['hourly']['temperature_2m'],
             'precipitation_probability': data['hourly']['precipitation_probability'],
             'cloud_cover': data['hourly']['cloud_cover'],
             'relative_humidity_2m': data['hourly']['relative_humidity_2m'],
@@ -81,25 +121,30 @@ def fetch_weather_data(latitude: float, longitude: float) -> tuple[pd.DataFrame,
             'weather_code': data['hourly']['weather_code']
         })
         
-        # Add timezone information
-        hourly_df['time'] = hourly_df['time'].dt.tz_localize(timezone_str)
-        
-        # Process daily data
+        # Process daily data for sunrise/sunset
         daily_df = pd.DataFrame({
             'date': pd.to_datetime(data['daily']['time']),
             'sunrise': pd.to_datetime(data['daily']['sunrise']),
             'sunset': pd.to_datetime(data['daily']['sunset'])
         })
         
-        # Add timezone information to sunrise/sunset
+        # Localize all timestamps to the correct timezone from the API
+        hourly_df['time'] = hourly_df['time'].dt.tz_localize(timezone_str)
+        daily_df['date'] = daily_df['date'].dt.tz_localize(timezone_str)
         daily_df['sunrise'] = daily_df['sunrise'].dt.tz_localize(timezone_str)
         daily_df['sunset'] = daily_df['sunset'].dt.tz_localize(timezone_str)
         
-        return hourly_df, daily_df
+        return hourly_df, daily_df, timezone_str
         
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request error: {str(e)}")
+        return None, None, None
+    except KeyError as e:
+        logger.error(f"Data parsing error - missing key: {str(e)}")
+        return None, None, None
     except Exception as e:
         logger.error(f"Error fetching weather data: {str(e)}")
-        return None, None
+        return None, None, None
 
 # --------------------------
 # Main Entry Point

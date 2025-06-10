@@ -1090,6 +1090,16 @@ def update_weather(selected_city, temp_unit, wind_unit, n_clicks):
         print(f"Raw sunrise: {today_sun['sunrise']} ({today_sun['sunrise'].tzinfo})")
         print(f"Raw sunset: {today_sun['sunset']} ({today_sun['sunset'].tzinfo})")
         
+        # Get tomorrow's data for comparison
+        tomorrow = today + timedelta(days=1)
+        tomorrow_data = daily_df[daily_df['date'].dt.date == tomorrow]
+        
+        # If it's after sunset, show tomorrow's times
+        if now.time() > today_sun['sunset'].time():
+            if not tomorrow_data.empty:
+                today_sun = tomorrow_data.iloc[0]
+                print("\nUsing tomorrow's sun times because current time is after sunset")
+        
         # Format times
         sunrise_str = today_sun['sunrise'].strftime('%I:%M %p').lstrip('0')
         sunset_str = today_sun['sunset'].strftime('%I:%M %p').lstrip('0')
