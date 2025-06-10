@@ -958,105 +958,126 @@ def mph_to_kph(mph):
     prevent_initial_call=False
 )
 def update_weather(selected_city, temp_unit, wind_unit, n_clicks):
-    triggered = callback_context.triggered[0]['prop_id']
-    button_class = 'refresh-button'
-    
-    # Debug print to see what triggered the update
-    print(f"\nCallback triggered by: {triggered}")
-    
-    # Get current system time for the timestamp
-    local_time = datetime.now()
-    timestamp = f"Updated at {local_time.strftime('%I:%M %p').replace(' 0', ' ')} (Local Time)"
-
-    if selected_city is None:
-        return html.P('Please select a city'), button_class, timestamp
-    
-    # Get coordinates for selected city
     try:
-        lat, lon = cities[selected_city]
-    except KeyError:
-        return dbc.Alert(
-            "Please select a valid city from the dropdown.",
-            color="warning",
-            className="mb-3",
-            style={
-                'background-color': '#f5f5dc',
-                'color': '#000080',
-                'border-color': '#000080',
-                'font-family': 'Courier Prime, monospace'
-            }
-        ), button_class, timestamp
-    
-    # Fetch weather data
-    df, daily_df = fetch_weather_data(lat, lon)
-    
-    if df is None or daily_df is None:
-        error_alert = dbc.Alert(
-            [
-                html.I(className="fas fa-exclamation-triangle me-2"),
-                "Unable to fetch weather data. Please try again later."
-            ],
-            color="danger",
-            className="mb-3",
-            style={
-                'backgroundColor': '#f5f5dc',
-                'color': '#8B0000',
-                'border': '2px solid #8B0000',
-                'fontFamily': 'Courier Prime, monospace',
-                'display': 'flex',
-                'alignItems': 'center',
-                'gap': '10px',
-                'justifyContent': 'center',
-                'padding': '20px',
-                'marginTop': '20px',
-                'fontSize': '1.1rem'
-            }
-        )
-        return error_alert, button_class, timestamp
+        triggered = callback_context.triggered[0]['prop_id']
+        button_class = 'refresh-button'
+        
+        # Debug print to see what triggered the update
+        print(f"\nCallback triggered by: {triggered}")
+        
+        # Get current system time for the timestamp
+        local_time = datetime.now()
+        timestamp = f"Updated at {local_time.strftime('%I:%M %p').replace(' 0', ' ')} (Local Time)"
 
-    # Get timezone for the selected city
-    try:
-        tf = TimezoneFinder()
-        timezone_str = tf.timezone_at(lat=lat, lng=lon)
-        if timezone_str is None:
-            raise ValueError("Could not determine timezone for the selected location")
-        city_tz = ZoneInfo(timezone_str)
-    except Exception as e:
-        error_alert = dbc.Alert(
-            [
-                html.I(className="fas fa-exclamation-triangle me-2"),
-                f"Error processing timezone data: {str(e)}"
-            ],
-            color="danger",
-            className="mb-3",
-            style={
-                'backgroundColor': '#f5f5dc',
-                'color': '#8B0000',
-                'border': '2px solid #8B0000',
-                'fontFamily': 'Courier Prime, monospace',
-                'display': 'flex',
-                'alignItems': 'center',
-                'gap': '10px',
-                'justifyContent': 'center',
-                'padding': '20px',
-                'marginTop': '20px',
-                'fontSize': '1.1rem'
-            }
-        )
-        return error_alert, button_class, timestamp
+        if selected_city is None:
+            print("No city selected")
+            return html.P('Please select a city'), button_class, timestamp
         
-        # Get current time in city's timezone
-        now = datetime.now(city_tz)
-        today = now.date()
+        # Get coordinates for selected city
+        try:
+            lat, lon = cities[selected_city]
+            print(f"Fetching weather for {selected_city} at coordinates: {lat}, {lon}")
+        except KeyError:
+            print(f"Invalid city selected: {selected_city}")
+            return dbc.Alert(
+                "Please select a valid city from the dropdown.",
+                color="warning",
+                className="mb-3",
+                style={
+                    'background-color': '#f5f5dc',
+                    'color': '#000080',
+                    'border-color': '#000080',
+                    'font-family': 'Courier Prime, monospace'
+                }
+            ), button_class, timestamp
         
-        # Debug logging for sunrise/sunset times
-        print("\n=== App Timezone Conversion Debug ===")
-        print(f"Selected city: {selected_city}")
-        print(f"Coordinates: {lat}, {lon}")
-        print(f"Detected timezone: {timezone_str}")
-        print(f"Current time in city: {now}")
-        print(f"Today's date: {today}")
+        # Fetch weather data
+        print("Calling fetch_weather_data...")
+        df, daily_df, timezone_str = fetch_weather_data(lat, lon)
         
+        if df is None or daily_df is None or timezone_str is None:
+            print("Weather data fetch returned None")
+            error_alert = dbc.Alert(
+                [
+                    html.I(className="fas fa-exclamation-triangle me-2"),
+                    "Unable to fetch weather data. Please try again later."
+                ],
+                color="danger",
+                className="mb-3",
+                style={
+                    'backgroundColor': '#f5f5dc',
+                    'color': '#8B0000',
+                    'border': '2px solid #8B0000',
+                    'fontFamily': 'Courier Prime, monospace',
+                    'display': 'flex',
+                    'alignItems': 'center',
+                    'gap': '10px',
+                    'justifyContent': 'center',
+                    'padding': '20px',
+                    'marginTop': '20px',
+                    'fontSize': '1.1rem'
+                }
+            )
+            return error_alert, button_class, timestamp
+
+        # Handle timezone conversion
+        try:
+            print(f"Using timezone from API: {timezone_str}")
+            city_tz = ZoneInfo(timezone_str)
+            
+            # Convert DataFrame times to timezone-aware if they aren't already
+            if not df['time'].dt.tz:
+                df['time'] = df['time'].dt.tz_localize('UTC').dt.tz_convert(city_tz)
+            else:
+                df['time'] = df['time'].dt.tz_convert(city_tz)
+            
+            df['local_time'] = df['time']
+            
+            # Get current time in city's timezone
+            now = datetime.now(city_tz)
+            today = now.date()
+            
+            # Convert daily DataFrame times if needed
+            if not daily_df['date'].dt.tz:
+                daily_df['date'] = daily_df['date'].dt.tz_localize('UTC').dt.tz_convert(city_tz)
+            else:
+                daily_df['date'] = daily_df['date'].dt.tz_convert(city_tz)
+                
+            if not daily_df['sunrise'].dt.tz:
+                daily_df['sunrise'] = daily_df['sunrise'].dt.tz_localize('UTC').dt.tz_convert(city_tz)
+            else:
+                daily_df['sunrise'] = daily_df['sunrise'].dt.tz_convert(city_tz)
+                
+            if not daily_df['sunset'].dt.tz:
+                daily_df['sunset'] = daily_df['sunset'].dt.tz_localize('UTC').dt.tz_convert(city_tz)
+            else:
+                daily_df['sunset'] = daily_df['sunset'].dt.tz_convert(city_tz)
+            
+        except Exception as e:
+            print(f"Timezone error: {str(e)}")
+            error_alert = dbc.Alert(
+                [
+                    html.I(className="fas fa-exclamation-triangle me-2"),
+                    f"Error processing timezone data: {str(e)}"
+                ],
+                color="danger",
+                className="mb-3",
+                style={
+                    'backgroundColor': '#f5f5dc',
+                    'color': '#8B0000',
+                    'border': '2px solid #8B0000',
+                    'fontFamily': 'Courier Prime, monospace',
+                    'display': 'flex',
+                    'alignItems': 'center',
+                    'gap': '10px',
+                    'justifyContent': 'center',
+                    'padding': '20px',
+                    'marginTop': '20px',
+                    'fontSize': '1.1rem'
+                }
+            )
+            return error_alert, button_class, timestamp
+            
         # Find today's data in the daily DataFrame
         today_data = daily_df[daily_df['date'].dt.date == today]
         if today_data.empty:
@@ -1105,8 +1126,11 @@ def update_weather(selected_city, temp_unit, wind_unit, n_clicks):
         ], className='current-weather-card sunrise-sunset-card')
 
         # Convert the DataFrame dates to city timezone and find current data
-        df['local_time'] = df['time'].dt.tz_convert(city_tz)
-        now = datetime.now(city_tz)
+        # First check if already timezone aware
+        if not df['time'].dt.tz:
+            df['local_time'] = pd.to_datetime(df['time']).dt.tz_localize('UTC').dt.tz_convert(city_tz)
+        else:
+            df['local_time'] = df['time'].dt.tz_convert(city_tz)
         
         # Find the closest forecast hour
         time_diffs = abs(df['local_time'] - now)
@@ -1127,7 +1151,7 @@ def update_weather(selected_city, temp_unit, wind_unit, n_clicks):
         print("=================================\n")
 
         # Convert temperatures if needed
-        current_temp = df['dew_point_2m'].iloc[0]
+        current_temp = df['temperature_2m'].iloc[0]
         if temp_unit == 'F':
             current_temp = celsius_to_fahrenheit(current_temp)
 
@@ -1316,7 +1340,7 @@ def update_weather(selected_city, temp_unit, wind_unit, n_clicks):
         # Create temperature trend chart
         temp_data = today_data.iloc[::2]  # Take every 2nd hour for 2-hour increments
         hours_temp = [d.strftime('%I %p').lstrip('0') for d in temp_data['local_time']]
-        temperatures = temp_data['dew_point_2m']
+        temperatures = temp_data['temperature_2m']
         
         # Convert temperatures if needed
         if temp_unit == 'F':
@@ -1351,7 +1375,7 @@ def update_weather(selected_city, temp_unit, wind_unit, n_clicks):
                 color = '#fdae61'  # Light orange
             else:
                 color = '#f46d43'  # Orange
-                
+            
             colors.append(color)
 
         temp_fig = go.Figure()
@@ -1476,8 +1500,31 @@ def update_weather(selected_city, temp_unit, wind_unit, n_clicks):
                 dbc.Col([precipitation_graph], width=12)
             ])
         ], button_class, timestamp
-    else:
-        return dbc.Alert('Error fetching weather data', color='danger'), button_class, timestamp
+
+    except Exception as e:
+        print(f"Unexpected error in callback: {str(e)}")
+        error_alert = dbc.Alert(
+            [
+                html.I(className="fas fa-exclamation-triangle me-2"),
+                "An unexpected error occurred. Please try again later."
+            ],
+            color="danger",
+            className="mb-3",
+            style={
+                'backgroundColor': '#f5f5dc',
+                'color': '#8B0000',
+                'border': '2px solid #8B0000',
+                'fontFamily': 'Courier Prime, monospace',
+                'display': 'flex',
+                'alignItems': 'center',
+                'gap': '10px',
+                'justifyContent': 'center',
+                'padding': '20px',
+                'marginTop': '20px',
+                'fontSize': '1.1rem'
+            }
+        )
+        return error_alert, button_class, timestamp
 
 # Run the app
 if __name__ == '__main__':
