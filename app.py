@@ -12,6 +12,7 @@ import pytz
 from timezonefinder import TimezoneFinder
 from zoneinfo import ZoneInfo
 from flask import request, jsonify
+from dash.exceptions import PreventUpdate
 
 # Add timestamp for cache busting
 current_timestamp = int(time.time())
@@ -36,13 +37,47 @@ app.index_string = '''
         {%favicon%}
         {%css%}
         <style>
+            #dash-wrapper {
+                width: 1400px;  /* Reduced from 1600px for better viewing */
+                min-width: 1400px;  /* Force minimum width */
+                margin: 0 auto;  /* Center when window is wider */
+            }
+
+            body {
+                margin: 0;
+                padding: 0;
+                overflow-x: auto;  /* Enable horizontal scrolling */
+            }
+
+            html, body {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+            }
+
+            #react-entry-point {
+                min-width: 1200px;  /* Increased minimum width */
+                width: 100%;
+            }
+
+            .dash-container {
+                min-width: 1200px;  /* Match react-entry-point */
+                width: 100%;
+            }
+
+            .dash-row {
+                min-width: 1200px;  /* Match container */
+                width: 100%;
+            }
+
+            /* Force minimum widths on our cards to prevent squishing */
             .current-weather-card {
                 background-color: #f5f5dc;
                 border: 2px solid #000080;
                 border-radius: 15px;
                 padding: 1.2rem;
                 margin-bottom: 1.5rem;
-                width: 420px;
+                width: 400px;  /* Increased width */
                 height: 300px;
                 display: flex;
                 flex-direction: column;
@@ -134,13 +169,13 @@ app.index_string = '''
                 display: flex;
                 flex-wrap: nowrap !important;
                 margin: 0;
-                gap: 1rem;
+                gap: 0.5rem;
             }
 
             .day-col {
                 flex: 1;
                 min-width: 0;
-                padding: 0.5rem;
+                padding: 0.25rem;
             }
 
             .day-card {
@@ -181,7 +216,8 @@ app.index_string = '''
                 align-items: center;
                 justify-content: center;
                 height: 100%;
-                padding: 10px;
+                padding: 0;
+                margin-top: -8px;  /* Adjust vertical alignment */
             }
 
             .temp-toggle-options {
@@ -227,24 +263,32 @@ app.index_string = '''
             .unit-label {
                 font-size: 1.2rem;
                 color: #8b4513;
+                line-height: 1;
+                margin-bottom: 4px;
             }
 
             .current-weather-card.forecast {
                 width: 100%;
-                min-width: 600px;
+                min-width: 600px;  /* Increased width */
                 height: 300px;
             }
 
             .precipitation-card {
                 margin-top: 1.5rem;
-                width: 100%;
+                width: 1400px;
+                margin-left: -2rem;  /* Pull back to align with wrapper edge */
+            }
+
+            .current-weather-card.precipitation-card {
+                padding-left: 2rem;
+                padding-right: 2rem;
             }
 
             .precipitation-graph {
                 background-color: #f5f5dc;
                 border-radius: 15px;
                 padding: 1rem;
-                width: 100%;
+                width: 100% !important;
             }
 
             .sunrise-sunset-card {
@@ -257,7 +301,7 @@ app.index_string = '''
                 flex-direction: column;
                 height: 300px;
                 overflow: hidden;
-                width: 420px;
+                width: 400px;  /* Increased width */
             }
 
             .sun-content {
@@ -319,9 +363,19 @@ app.index_string = '''
             }
 
             .temperature-trend-card {
-                height: 250px;
+                height: 300px !important;
                 margin-top: 1.5rem;
-                padding: 1rem;
+                padding: 0.5rem;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .temperature-trend-card > div {
+                flex: 1;
+                height: 100% !important;
+                width: 100% !important;
+                min-height: 230px !important;  /* Enforce minimum height */
+                max-height: 230px !important;  /* Enforce maximum height */
             }
 
             .vertical-divider {
@@ -330,6 +384,52 @@ app.index_string = '''
                 background-color: #000080;
                 opacity: 0.2;
                 margin: 0 1rem;
+            }
+
+            .refresh-button {
+                background-color: #f5f5dc;
+                border: 2px solid #000080;
+                border-radius: 8px;
+                color: #000080;
+                padding: 8px 16px;
+                cursor: pointer;
+                transition: all 0.3s ease;
+                font-family: 'Courier Prime', monospace;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                height: 38px;  /* Match dropdown height */
+            }
+
+            .refresh-button:hover {
+                background-color: #000080;
+                color: #f5f5dc;
+            }
+
+            .refresh-button i {
+                transition: transform 0.5s ease;
+            }
+
+            .refresh-button.refreshing i {
+                animation: spin 1s linear infinite;
+            }
+
+            @keyframes spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+
+            .last-updated {
+                font-family: 'Courier Prime', monospace;
+                font-size: 0.9rem;
+                color: #000080;
+                text-align: right;
+                padding: 4px 8px;
+                background-color: #f5f5dc;
+                border: 1px solid #000080;
+                border-radius: 4px;
+                margin-left: auto;
+                display: inline-block;
             }
         </style>
     </head>
@@ -693,84 +793,118 @@ for country, country_cities in cities_by_country.items():
     cities.update(country_cities)
 
 # Create the app layout with Bootstrap components
-app.layout = dbc.Container([
-    dbc.Row([
-        dbc.Col([
-            html.H1('Weather Dashboard', className='text-primary text-center mb-4 mt-4'),
-            html.Hr()
-        ])
-    ]),
-    
-    dbc.Row([
-        # Location Dropdown (70% width)
-        dbc.Col([
-            dbc.Card([
-                dbc.CardBody([
-                    html.H4('Select Location', className='card-title'),
-                    dcc.Dropdown(
-                        id='city-dropdown',
-                        options=[
-                            {'label': f"{city} ({country})", 'value': city}
-                            for country in cities_by_country
-                            for city in cities_by_country[country]
-                        ],
-                        value='New York',
-                        className='mb-2'
-                    )
-                ])
-            ], className='mb-4')
-        ], width=8),
-        
-        # Temperature Toggle (30% width)
-        dbc.Col([
-            dbc.Card([
-                dbc.CardBody([
-                    html.H4('Unit', className='card-title'),
+app.layout = html.Div([  # Outer div for scrolling
+    html.Div([  # Fixed width wrapper
+        dbc.Container([
+            dbc.Row([
+                dbc.Col([
+                    html.H1('WEATHER FOR DATA NERDS', 
+                             className='text-center mb-4 mt-4',
+                             style={
+                                 'fontFamily': 'DM Serif Display, serif',
+                                 'fontSize': '32px',
+                                 'letterSpacing': '0.2em',
+                                 'color': '#000080',
+                                 'textTransform': 'uppercase'
+                             }),
                     html.Div([
-                        html.Div([
-                            # Temperature options with labels
-                            html.Div([
-                                html.Span("°C", className='unit-label')
-                            ], className='temp-option'),
-                            html.Div([
-                                html.Span("°F", className='unit-label')
-                            ], className='temp-option')
-                        ], className='temp-toggle-options'),
-                        # Single radio button group below
-                        dcc.RadioItems(
-                            id='temp-unit-toggle',
-                            options=[
-                                {'label': '', 'value': 'C'},
-                                {'label': '', 'value': 'F'}
-                            ],
-                            value='C',
-                            className='radio-group',
-                            style={'display': 'flex', 'gap': '60px', 'margin-top': '8px'}
-                        )
-                    ], className='temp-toggle-container')
+                        html.Div(id='last-updated', className='last-updated'),
+                    ], style={'textAlign': 'right', 'marginTop': '-40px'}),
+                    html.Hr()
                 ])
-            ], className='mb-4')
-        ], width=4)
-    ]),
-    
-    dbc.Row([
-        dbc.Col([
-            html.Div(id='weather-display')
-        ])
-    ])
-], fluid=True)
+            ]),
+            
+            dbc.Row([
+                # Location Dropdown (70% width)
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H4('Select Location', className='card-title'),
+                            html.Div([
+                                dcc.Dropdown(
+                                    id='city-dropdown',
+                                    options=[
+                                        {'label': f"{city} ({country})", 'value': city}
+                                        for country in cities_by_country
+                                        for city in cities_by_country[country]
+                                    ],
+                                    value='New York',
+                                    className='mb-2',
+                                    style={'width': 'calc(100% - 120px)'}
+                                ),
+                                html.Button([
+                                    html.I(className="fas fa-sync-alt"),
+                                    "Refresh"
+                                ], id='refresh-button', className='refresh-button')
+                            ], style={'display': 'flex', 'gap': '10px', 'alignItems': 'center'})
+                        ])
+                    ], className='mb-4')
+                ], width=8),
+                
+                # Temperature Toggle (30% width)
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H4('Unit', className='card-title'),
+                            html.Div([
+                                html.Div([
+                                    html.Div([
+                                        html.Span("°C", className='unit-label')
+                                    ], className='temp-option'),
+                                    html.Div([
+                                        html.Span("°F", className='unit-label')
+                                    ], className='temp-option')
+                                ], className='temp-toggle-options'),
+                                dcc.RadioItems(
+                                    id='temp-unit-toggle',
+                                    options=[
+                                        {'label': '', 'value': 'C'},
+                                        {'label': '', 'value': 'F'}
+                                    ],
+                                    value='C',
+                                    className='radio-group',
+                                    style={'display': 'flex', 'gap': '60px', 'margin-top': '4px'}
+                                )
+                            ], className='temp-toggle-container')
+                        ])
+                    ], className='mb-4')
+                ], width=4)
+            ]),
+            
+            dbc.Row([
+                dbc.Col([
+                    html.Div(id='weather-display')
+                ])
+            ])
+        ], fluid=True)
+    ], id='dash-wrapper', style={'padding': '0 1rem'})  # Added padding
+], style={'width': '100%', 'overflowX': 'auto'})
 
 def celsius_to_fahrenheit(celsius):
     return (celsius * 9/5) + 32
 
 @callback(
-    Output('weather-display', 'children'),
+    [Output('weather-display', 'children'),
+     Output('refresh-button', 'className'),
+     Output('last-updated', 'children')],
     [Input('city-dropdown', 'value'),
-     Input('temp-unit-toggle', 'value')]
+     Input('temp-unit-toggle', 'value'),
+     Input('refresh-button', 'n_clicks')],
+    prevent_initial_call=False
 )
-def update_weather(selected_city, temp_unit):
+def update_weather(selected_city, temp_unit, n_clicks):
+    triggered = callback_context.triggered[0]['prop_id']
+    button_class = 'refresh-button'
+    
+    # Debug print to see what triggered the update
+    print(f"\nCallback triggered by: {triggered}")
+    
+    # Get current system time for the timestamp
+    local_time = datetime.now()
+    timestamp = f"Updated at {local_time.strftime('%I:%M %p').replace(' 0', ' ')} (Local Time)"
+
     if selected_city is None:
-        return html.P('Please select a city')
+        return html.P('Please select a city'), button_class, timestamp
     
     # Get coordinates for selected city
     try:
@@ -786,7 +920,7 @@ def update_weather(selected_city, temp_unit):
                 'border-color': '#000080',
                 'font-family': 'Courier Prime, monospace'
             }
-        )
+        ), button_class, timestamp
     
     # Fetch weather data
     df, daily_df = fetch_weather_data(lat, lon)
@@ -870,6 +1004,13 @@ def update_weather(selected_city, temp_unit):
         # Get weather description and icon name for current conditions
         current_weather_code = df['weather_code'].iloc[0]
         weather_desc, icon_name = get_weather_info(current_weather_code)
+        
+        # Debug logging for weather code
+        print(f"\nWeather Code Debug:")
+        print(f"Current weather code: {current_weather_code}")
+        print(f"Weather description: {weather_desc}")
+        print(f"Icon name: {icon_name}")
+        print("=================================\n")
 
         # Convert temperatures if needed
         current_temp = df['dew_point_2m'].iloc[0]
@@ -956,8 +1097,9 @@ def update_weather(selected_city, temp_unit):
         hours = [d.strftime('%I %p').lstrip('0') for d in today_data['local_time']]
         probabilities = today_data['precipitation_probability']
         
-        # Calculate y-axis range
+        # Calculate y-axis range with extra padding for labels
         y_max = max(max(probabilities), 10)  # At least 10%
+        y_max = y_max * 1.3  # Add 30% padding at the top for labels
 
         # Define color bins
         def get_marker_color(prob):
@@ -1039,8 +1181,8 @@ def update_weather(selected_city, temp_unit):
                 range=[0, y_max * 1.1],
                 dtick=5
             ),
-            margin=dict(t=40, r=20, b=40, l=40),
-            height=300,
+            margin=dict(t=50, r=20, b=30, l=40),  # Reset to reasonable margins
+            height=250,  # Reset to original height
             width=None,
             autosize=True
         )
@@ -1058,12 +1200,22 @@ def update_weather(selected_city, temp_unit):
         hours_temp = [d.strftime('%I %p').lstrip('0') for d in temp_data['local_time']]
         temperatures = temp_data['dew_point_2m']
         
+        # Convert temperatures if needed
         if temp_unit == 'F':
             temperatures = [celsius_to_fahrenheit(t) for t in temperatures]
-
-        # Create color scale based on temperature
+        
+        # Calculate temperature range
         min_temp = min(temperatures)
         max_temp = max(temperatures)
+        
+        # Add fixed padding based on the unit
+        if temp_unit == 'F':
+            padding = 15  # Fixed 15°F padding
+        else:
+            padding = 8   # Fixed 8°C padding
+            
+        y_min = min_temp - padding
+        y_max = max_temp + padding
         
         # Generate colors based on temperature values
         colors = []
@@ -1138,30 +1290,39 @@ def update_weather(selected_city, temp_unit):
                 showspikes=False,   # No spike lines
                 zeroline=False      # No zero line
             ),
+            margin=dict(t=40, r=10, b=30, l=30),  # Adjusted margins
+            height=270,  # Slightly reduced height
+            width=None,  # Allow width to be set by container
+            autosize=True,  # Enable autosize for width only
+            showlegend=False,
+            bargap=0.15,  # Slightly reduced gap between bars
             yaxis=dict(
                 showgrid=True,
                 gridcolor='rgba(0,0,128,0.1)',
                 ticksuffix=f'°{temp_unit}',
                 dtick=5,
-                range=[min(temperatures) - 5, max(temperatures) + 10],
+                range=[y_min, y_max],
                 tickfont=dict(size=12),
                 showline=False,     # No Y-axis line
                 zeroline=False      # No zero line
             ),
-            margin=dict(t=30, r=20, b=30, l=40),  # Adjusted margins
-            height=190,  # Adjusted to fit in the 250px container with padding
-            width=None,
-            autosize=True,
-            showlegend=False,
-            bargap=0.2
+            uniformtext=dict(
+                mode='hide',
+                minsize=10
+            )
         )
 
         temperature_graph = html.Div([
-            dcc.Graph(
-                figure=temp_fig,
-                config={'displayModeBar': False},
-                style={'width': '100%', 'height': '100%'}
-            )
+                            dcc.Graph(
+                    figure=temp_fig,
+                    config={'displayModeBar': False},
+                    style={
+                        'height': '270px',
+                        'width': '100%',
+                        'minHeight': '270px',
+                        'maxHeight': '270px'
+                    }
+                )
         ], className='current-weather-card temperature-trend-card forecast')
 
         return [
@@ -1170,7 +1331,7 @@ def update_weather(selected_city, temp_unit):
                 dbc.Col([
                     current_weather,
                     sun_times
-                ], width=5, style={"paddingRight": "0.5rem"}),  # Minimal right padding
+                ], width=4, style={"paddingRight": "2rem"}),  # Increased right padding
                 
                 # Week Forecast Section
                 dbc.Col([
@@ -1190,15 +1351,15 @@ def update_weather(selected_city, temp_unit):
                             style={'width': '100%', 'height': '100%'}
                         )
                     ], className='current-weather-card temperature-trend-card forecast')
-                ], width=7, style={"paddingLeft": "0.5rem"})  # Minimal left padding
+                ], width=8, style={"paddingLeft": "2rem"})  # Minimal left padding
             ], className="g-0"),  # Remove default gutters
             # Precipitation Graph Row
             dbc.Row([
                 dbc.Col([precipitation_graph], width=12)
             ])
-        ]
+        ], button_class, timestamp
     else:
-        return dbc.Alert('Error fetching weather data', color='danger')
+        return dbc.Alert('Error fetching weather data', color='danger'), button_class, timestamp
 
 # Run the app
 if __name__ == '__main__':
