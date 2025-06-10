@@ -260,6 +260,23 @@ app.index_string = '''
                 transform: translate(-50%, -50%);
             }
 
+            .toggle-label {
+                font-family: 'DM Serif Display', serif;
+                font-size: 1rem;
+                color: #000080;
+                margin-bottom: 8px;
+                letter-spacing: 0.1em;
+                text-align: center;
+            }
+
+            .unit-divider {
+                width: 2px;
+                align-self: stretch;
+                background-color: #000080;
+                opacity: 0.2;
+                margin: 25px 0;
+            }
+
             .unit-label {
                 font-size: 1.2rem;
                 color: #8b4513;
@@ -830,13 +847,22 @@ app.layout = html.Div([  # Outer div for scrolling
                                     ],
                                     value='New York',
                                     className='mb-2',
-                                    style={'width': 'calc(100% - 120px)'}
+                                    style={
+                                        'width': 'calc(100% - 120px)',
+                                        'height': '38px'  # Match button height
+                                    }
                                 ),
                                 html.Button([
                                     html.I(className="fas fa-sync-alt"),
                                     "Refresh"
                                 ], id='refresh-button', className='refresh-button')
-                            ], style={'display': 'flex', 'gap': '10px', 'alignItems': 'center'})
+                            ], style={
+                                'display': 'flex', 
+                                'gap': '10px', 
+                                'alignItems': 'center',
+                                'marginTop': '8px',  # Add some space below the title
+                                'marginBottom': '8px'  # Add some space at the bottom
+                            })
                         ])
                     ], className='mb-4')
                 ], width=8),
@@ -845,27 +871,62 @@ app.layout = html.Div([  # Outer div for scrolling
                 dbc.Col([
                     dbc.Card([
                         dbc.CardBody([
-                            html.H4('Unit', className='card-title'),
+                            html.H4('Units', className='card-title'),
                             html.Div([
+                                # Left toggle (Temperature)
                                 html.Div([
+                                    html.Div("Temperature", className='toggle-label'),
                                     html.Div([
-                                        html.Span("°C", className='unit-label')
-                                    ], className='temp-option'),
+                                        # Labels
+                                        html.Div([
+                                            html.Div("°C", style={'width': '60px', 'textAlign': 'center'}),
+                                            html.Div("°F", style={'width': '60px', 'textAlign': 'center'})
+                                        ], style={'display': 'flex', 'justifyContent': 'center', 'gap': '30px', 'marginBottom': '4px'}),
+                                        # Radio buttons
+                                        dcc.RadioItems(
+                                            id='temp-unit-toggle',
+                                            options=[
+                                                {'label': '', 'value': 'C'},
+                                                {'label': '', 'value': 'F'}
+                                            ],
+                                            value='C',
+                                            className='radio-group',
+                                            style={'display': 'flex', 'justifyContent': 'center', 'gap': '60px'}
+                                        )
+                                    ], style={'textAlign': 'center'})
+                                ], style={'flex': '1', 'marginRight': '20px'}),
+                                
+                                # Vertical divider
+                                html.Div(className='unit-divider'),
+                                
+                                # Right toggle (Wind Speed)
+                                html.Div([
+                                    html.Div("Wind Speed", className='toggle-label'),
                                     html.Div([
-                                        html.Span("°F", className='unit-label')
-                                    ], className='temp-option')
-                                ], className='temp-toggle-options'),
-                                dcc.RadioItems(
-                                    id='temp-unit-toggle',
-                                    options=[
-                                        {'label': '', 'value': 'C'},
-                                        {'label': '', 'value': 'F'}
-                                    ],
-                                    value='C',
-                                    className='radio-group',
-                                    style={'display': 'flex', 'gap': '60px', 'margin-top': '4px'}
-                                )
-                            ], className='temp-toggle-container')
+                                        # Labels
+                                        html.Div([
+                                            html.Div("MPH", style={'width': '60px', 'textAlign': 'center'}),
+                                            html.Div("KPH", style={'width': '60px', 'textAlign': 'center'})
+                                        ], style={'display': 'flex', 'justifyContent': 'center', 'gap': '30px', 'marginBottom': '4px'}),
+                                        # Radio buttons
+                                        dcc.RadioItems(
+                                            id='wind-unit-toggle',
+                                            options=[
+                                                {'label': '', 'value': 'MPH'},
+                                                {'label': '', 'value': 'KPH'}
+                                            ],
+                                            value='MPH',
+                                            className='radio-group',
+                                            style={'display': 'flex', 'justifyContent': 'center', 'gap': '60px'}
+                                        )
+                                    ], style={'textAlign': 'center'})
+                                ], style={'flex': '1', 'marginLeft': '20px'})
+                            ], style={
+                                'display': 'flex',
+                                'alignItems': 'flex-start',
+                                'justifyContent': 'space-between',
+                                'width': '100%'
+                            })
                         ])
                     ], className='mb-4')
                 ], width=4)
@@ -883,16 +944,20 @@ app.layout = html.Div([  # Outer div for scrolling
 def celsius_to_fahrenheit(celsius):
     return (celsius * 9/5) + 32
 
+def mph_to_kph(mph):
+    return mph * 1.60934
+
 @callback(
     [Output('weather-display', 'children'),
      Output('refresh-button', 'className'),
      Output('last-updated', 'children')],
     [Input('city-dropdown', 'value'),
      Input('temp-unit-toggle', 'value'),
+     Input('wind-unit-toggle', 'value'),
      Input('refresh-button', 'n_clicks')],
     prevent_initial_call=False
 )
-def update_weather(selected_city, temp_unit, n_clicks):
+def update_weather(selected_city, temp_unit, wind_unit, n_clicks):
     triggered = callback_context.triggered[0]['prop_id']
     button_class = 'refresh-button'
     
@@ -925,11 +990,60 @@ def update_weather(selected_city, temp_unit, n_clicks):
     # Fetch weather data
     df, daily_df = fetch_weather_data(lat, lon)
     
-    if df is not None and daily_df is not None:
-        # Get timezone for the selected city
+    if df is None or daily_df is None:
+        error_alert = dbc.Alert(
+            [
+                html.I(className="fas fa-exclamation-triangle me-2"),
+                "Unable to fetch weather data. Please try again later."
+            ],
+            color="danger",
+            className="mb-3",
+            style={
+                'backgroundColor': '#f5f5dc',
+                'color': '#8B0000',
+                'border': '2px solid #8B0000',
+                'fontFamily': 'Courier Prime, monospace',
+                'display': 'flex',
+                'alignItems': 'center',
+                'gap': '10px',
+                'justifyContent': 'center',
+                'padding': '20px',
+                'marginTop': '20px',
+                'fontSize': '1.1rem'
+            }
+        )
+        return error_alert, button_class, timestamp
+
+    # Get timezone for the selected city
+    try:
         tf = TimezoneFinder()
         timezone_str = tf.timezone_at(lat=lat, lng=lon)
+        if timezone_str is None:
+            raise ValueError("Could not determine timezone for the selected location")
         city_tz = ZoneInfo(timezone_str)
+    except Exception as e:
+        error_alert = dbc.Alert(
+            [
+                html.I(className="fas fa-exclamation-triangle me-2"),
+                f"Error processing timezone data: {str(e)}"
+            ],
+            color="danger",
+            className="mb-3",
+            style={
+                'backgroundColor': '#f5f5dc',
+                'color': '#8B0000',
+                'border': '2px solid #8B0000',
+                'fontFamily': 'Courier Prime, monospace',
+                'display': 'flex',
+                'alignItems': 'center',
+                'gap': '10px',
+                'justifyContent': 'center',
+                'padding': '20px',
+                'marginTop': '20px',
+                'fontSize': '1.1rem'
+            }
+        )
+        return error_alert, button_class, timestamp
         
         # Get current time in city's timezone
         now = datetime.now(city_tz)
@@ -1038,7 +1152,11 @@ def update_weather(selected_city, temp_unit, n_clicks):
                     # Wind Speed
                     html.Div([
                         html.Div("WIND", className="detail-label"),
-                        html.Div(f"{df['wind_speed_180m'].iloc[0]:.1f} mph", className="detail-value")
+                        html.Div(
+                            f"{mph_to_kph(df['wind_speed_180m'].iloc[0]):.1f} kph" if wind_unit == 'KPH' 
+                            else f"{df['wind_speed_180m'].iloc[0]:.1f} mph", 
+                            className="detail-value"
+                        )
                     ], className="current-weather-detail-item"),
                     
                     # Humidity
