@@ -1187,8 +1187,8 @@ def update_weather(selected_city, temp_unit, wind_unit, n_clicks):
                     html.Div([
                         html.Div("WIND", className="detail-label"),
                         html.Div(
-                            f"{mph_to_kph(df['wind_speed_180m'].iloc[0]):.1f} kph" if wind_unit == 'KPH' 
-                            else f"{df['wind_speed_180m'].iloc[0]:.1f} mph", 
+                            f"{mph_to_kph(df['wind_speed_10m'].iloc[0]):.1f} kph" if wind_unit == 'KPH' 
+                            else f"{df['wind_speed_10m'].iloc[0]:.1f} mph", 
                             className="detail-value"
                         )
                     ], className="current-weather-detail-item"),
@@ -1204,46 +1204,54 @@ def update_weather(selected_city, temp_unit, wind_unit, n_clicks):
 
         # Update forecast cards with correct temperature unit
         forecast_cards = []
-        current_date = datetime.now()
-        for i in range(0, 7):
-            day_data = df.iloc[i * 24]
-            weather_code = day_data['weather_code']
-            _, icon_name = get_weather_info(weather_code)
+        current_date = datetime.now(city_tz)  # Make sure we use city timezone
+        
+        # Group hourly data by day and calculate min/max temps
+        df['date'] = df['local_time'].dt.date
+        for i in range(7):
+            forecast_date = (current_date + timedelta(days=i)).date()
+            day_data = df[df['date'] == forecast_date]
             
-            temp = day_data['dew_point_2m']
-            temp_low = temp - 5  # Simulated low temp
-            
-            if temp_unit == 'F':
-                temp = celsius_to_fahrenheit(temp)
-                temp_low = celsius_to_fahrenheit(temp_low)
-            
-            display_date = current_date.strftime('%a')
-            if i == 0:
-                display_date = 'Today'
-            
-            day_card = dbc.Col([
-                html.Div([
-                    html.Div(
-                        display_date,
-                        className='day-name'
-                    ),
-                    html.Img(
-                        src=f'/assets/{icon_name}.png?v={current_timestamp}',
-                        className='weather-icon'
-                    ),
-                    html.Div(
-                        f"{int(temp)}°{temp_unit}",
-                        className='high-temp'
-                    ),
-                    html.Div(
-                        f"{int(temp_low)}°{temp_unit}",
-                        className='low-temp'
-                    )
-                ], className='day-card')
-            ], className='day-col', width=True)
-            
-            forecast_cards.append(day_card)
-            current_date = current_date.replace(day=current_date.day + 1)
+            if not day_data.empty:
+                # Get the weather code for the middle of the day (noon)
+                mid_day = day_data[day_data['local_time'].dt.hour.between(11, 13)]
+                weather_code = mid_day['weather_code'].iloc[0] if not mid_day.empty else day_data['weather_code'].iloc[0]
+                _, icon_name = get_weather_info(weather_code)
+                
+                # Calculate actual min and max temperatures
+                temp_max = day_data['temperature_2m'].max()
+                temp_min = day_data['temperature_2m'].min()
+                
+                if temp_unit == 'F':
+                    temp_max = celsius_to_fahrenheit(temp_max)
+                    temp_min = celsius_to_fahrenheit(temp_min)
+                
+                display_date = forecast_date.strftime('%a')
+                if i == 0:
+                    display_date = 'Today'
+                
+                day_card = dbc.Col([
+                    html.Div([
+                        html.Div(
+                            display_date,
+                            className='day-name'
+                        ),
+                        html.Img(
+                            src=f'/assets/{icon_name}.png?v={current_timestamp}',
+                            className='weather-icon'
+                        ),
+                        html.Div(
+                            f"{int(temp_max)}°{temp_unit}",
+                            className='high-temp'
+                        ),
+                        html.Div(
+                            f"{int(temp_min)}°{temp_unit}",
+                            className='low-temp'
+                        )
+                    ], className='day-card')
+                ], className='day-col', width=True)
+                
+                forecast_cards.append(day_card)
 
         # Create precipitation probability graph with local time
         hours = [d.strftime('%I %p').lstrip('0') for d in today_data['local_time']]
